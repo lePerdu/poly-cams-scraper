@@ -11,7 +11,7 @@ This project requires python 3 has the dependencies:
 Run `pip install -r requirements.txt` to install these requirements
 (preferably in a [virtual environment](
     https://packaging.python.org/guides/installing-using-pip-and-virtualenv/
-).
+)).
 
 The script can be run with
 `python scheduler.py <username> <password> [<term>]`,

@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 
-## Class schedule generator
+## scheduler.py
+# Class schedule generator
 
-import sys
 from itertools import *
 
-from course_bot import scrape_courses
+import scraper
 
 def conflicts(c1, c2):
     for cl1, cl2 in product(c1['classes'], c2['classes']):
@@ -50,7 +50,9 @@ def print_schedules(all_courses, names):
             print()
 
 
-
+# main() function for executing the scraper locally
+# TODO Remove this once the project is more stable
+import sys
 def main(argv):
     username = argv[0]
     password = argv[1]
@@ -75,7 +77,6 @@ def main(argv):
 
     print('Possible schedules:')
     print_schedules(all_courses, desired)
-
 
 if __name__ == '__main__':
     main(sys.argv[1:])

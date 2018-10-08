@@ -1,25 +1,45 @@
-# FPSched
+# poly-cams-scraper
 
-Class schedule generator for Florida Polytechnic University
+Scraper for the Florida Polytechnic University CAMS system.
 
 ## Running
 
 This project requires python 3 has the dependencies:
-* requests
-* lxml
+* `requests`
+* `lxml`
+* `flask` (only for the webserver)
 
-Run `pip install -r requirements.txt` to install these requirements
-(preferably in a [virtual environment](
-    https://packaging.python.org/guides/installing-using-pip-and-virtualenv/
-)).
+Run `pipenv install` to install these requirements
 
-The main script can be run with
-`python scheduler.py <username> <password> [<term>]`,
-using your normal Florida Poly login info. The term is the numerical identifier
-for the term and the value will default to 27 (Fall 2018). The program will
-retrieve a list of all courses in the term and then prompt for the ones you
-wish to take (give the full identifier (i.e. MAC2312 or EEL3112C). It will then
-print out a list of courses with their section numbers that do not overlap.
+### Webserver
 
-Running `course_bot.py` with the same arguments will print out a list of all
-the classes in the term in a somewhat-human-readable format.
+The webserver can be run with `pipenv run python app.py`. It has the following
+API methods:
+* GET `/terms` - Returns a JSON object mapping term names (i.e. "Fall 2018") to
+  term IDs used by other API methods.
+* POST `/courses` - Returns a JSON array of objects describing the available
+  courses for a given term. The username and password are passed via HTTP Basic
+  Authentication and the term is passed via the `term` form data.
+
+Endpoints can be suffixed with `?pretty=true` to make them return JSON pretty-
+printed instead of minimized.
+
+### Course Scraper
+
+Courses can be scrapped locally by running:
+`pipenv run python scraper.py <username> <password> [<term>]`
+The output format is as above.
+
+### Schedule Generator
+
+A primitive interactive command-line script `scheduler.py` can be run which
+will prompt for a list of courses and output all possible schedules for the
+term with those courses. The program will retrieve a list of all courses in the
+term and then prompt for the ones you wish to take (give the full identifier
+(i.e. MAC2312 or EEL3112C). It will then print out a list of courses with their
+section numbers that do not overlap.
+
+## License
+
+[The Unlicense](unlicense.org)
+

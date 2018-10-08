@@ -1,44 +1,63 @@
 #!/usr/bin/env python
 
-# course_bot.py
-# Web bot for retrieving a list of courses from Florida Poly CAMS given login
-# information
+## scraper.py
+# Functions for scraping data from the CAMS portal
+#
 
 import re
-import sys
 from datetime import datetime
-from pprint import pprint
 
 import requests
 from lxml import html
 
+
 def pairs_to_dict(pairs):
     return {k: v for k, v in pairs if k}
+
 
 def get_attr(attrs, name):
     for k, v in attrs:
         if k == name: return v
     return None
 
+
 def get_text(elem):
     return elem.text.strip()
 
-def parse_date(date):
-    return datetime.strptime(date, '%m/%d/%Y')
 
-def parse_time(time):
-    return datetime.strptime(time, '%I:%M:%S %p')
+def parse_date(datestr):
+    """
+        Parses a date in the format %m/%d/%Y into a POSIX timestamp
+        TODO Should this output in ISO format instead?
+    """
+    return int(datetime.strptime(datestr, '%m/%d/%Y').timestamp())
+
+
+def parse_time(timestr):
+    """
+        Parses a time in the format %H:%M:%S into a POSIX timestamp (number
+        of seconds from the start of the day)
+        TODO Should this output in ISO format instead?
+    """
+
+    # strptime uses 1900-01-01 as the default date, so subtract it out to get
+    # the timestamp from the start of the day
+    return int((datetime.strptime(timestr, '%I:%M:%S %p')
+          - datetime(1900, 1, 1)).total_seconds())
+
 
 def parse_course_id(id):
     '''
     Parses a course identifier of the form:
         DEP<COURSE #>TYPE<SECTION #>
     Into a (departement, course, section) tuple
+
+    Note: Some older courses do not have a type field or section
     '''
 
     # TODO What other suffixes are there besides C (for lab) and how can they
     # be differentiated from the type of course (i.e. GENMAT, ENGR)?
-    dep, course, sec = re.match(r'(\w{3})(\w{4}C?)[^\d]+(\d+)?', id).groups()
+    dep, course, sec = re.match(r'(\w{3})(\w{4}C?)(?:[^\d]+)?(\d+)?', id).groups()
     # Some course identifiers don't include the section, so we assume it's 1
     return (dep, course, sec and int(sec) or 1)
 
@@ -114,8 +133,9 @@ def parse_courses(tree):
     for row1, row2 in zip(row1s, row2s):
         id, title, creds, start_date, end_date, cap, enr = \
             map(get_text, row1.xpath('td'))
-        # The title is nested in an anchor element
-        #title = get_text(row1.xpath('td[2]/a')[0])
+        # For courses currently offered, the title is wrapped in an anchor
+        # element, though for non-existing ones, it is not.
+        if title == '': title = get_text(row1.xpath('td[2]/a')[0])
 
         classes = []
         for class_row in row2.xpath('tr[position() > 1]'):
@@ -148,16 +168,17 @@ def scrape_courses(username, password, term):
         'op': 'login'
     }
 
-    r = requests.post(
+    session = requests.Session()
+
+    r = session.post(
         'https://cams.floridapoly.org/student/ceProcess.asp',
         data=form_data)
     # TODO Error if the login cookies aren't returned
 
     # The first page can be retrieved via GET, but the rest have to be POSTed
     # and contain an access key returned in a form in the first page
-    first_page = requests.get(
-        'https://cams.floridapoly.org/student/cePortalOffering.asp',
-        cookies=r.cookies)
+    first_page = session.get(
+        'https://cams.floridapoly.org/student/cePortalOffering.asp')
 
     first_page_tree = html.fromstring(first_page.text)
 
@@ -187,14 +208,9 @@ def scrape_courses(username, password, term):
             'TimeTo': '',
         }
 
-        later_page = requests.post(
+        later_page = session.post(
             'https://cams.floridapoly.org/student/cePortalOffering.asp',
-            data=offering_data,
-            cookies=r.cookies)
-
-        f = open('courses.html', 'w')
-        f.write(later_page.text)
-        f.close()
+            data=offering_data)
 
         later_page_tree = html.fromstring(later_page.text)
         courses = parse_courses(later_page_tree)
@@ -202,25 +218,44 @@ def scrape_courses(username, password, term):
         all_courses.extend(courses)
 
     # Logout (don't care about the responce)
-    requests.get(
-        'https://cams.floridapoly.org/student/logout.asp',
-         cookies=r.cookies)
+    session.get('https://cams.floridapoly.org/student/logout.asp')
 
     return all_courses
 
 
+def scrape_terms():
+    """
+        Gets the mapping between term names and their numbers.
+        This does not require login info, as the terms are listed on the login
+        page.
+    """
 
+    login_page = requests.get('https://cams.floridapoly.org/student/login.asp')
+
+    login_page_tree = html.fromstring(login_page.text)
+
+
+    terms = {}
+    for term in login_page_tree.xpath('//*[@id="idterm"]/option'):
+        terms[get_text(term)] = term.get('value')
+
+    return terms
+
+
+# main() function for executing the scraper locally
+# TODO Remove this once the project is more stable
+import json
+import sys
 def main(argv):
     username = argv[0]
     password = argv[1]
 
     # TODO Figure out what terms are valid
     # (19 is Fall 2017)
-    term = len(argv) > 2 and argv[2] or 19
+    term = len(argv) > 2 and argv[2] or 27
 
     courses = scrape_courses(username, password, term)
-    pprint(courses)
-
+    print(json.dumps(courses, indent=2))
 
 if __name__ == '__main__':
     main(sys.argv[1:])

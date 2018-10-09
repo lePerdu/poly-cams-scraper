@@ -4,6 +4,7 @@
 # Flask application entry point
 
 import json
+from functools import wraps
 
 from flask import Flask, Response, request
 from flask_heroku import Heroku
@@ -22,19 +23,41 @@ def to_json(obj, pretty=False):
         return json.dumps(obj, separators=(',', ':'))
 
 
+def authenticate():
+    """Send a 401 responce that enables and requests basic auth"""
+    return Response('Florida Poly credentials needed for access',
+        401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
+
+
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not request.authorization:
+            return authenticate()
+        else:
+            return f(*args, **kwargs)
+    return decorated
+
+
 @app.route('/terms', methods=['GET'])
 def get_terms():
     return Response(to_json(scraper.scrape_terms()),
         mimetype='application/json')
 
 
-@app.route('/courses', methods=['POST'])
+@app.route('/courses', methods=['GET'])
+@requires_auth
 def get_courses():
-    return Response(to_json(scraper.scrape_courses(
-        request.authorization.username,
-        request.authorization.password,
-        request.form['term']
-    )), mimetype='application/json')
+    # TODO Reply back with authenticate() if the scraper says the credentials
+    # are invalid
+    try:
+        return Response(to_json(scraper.scrape_courses(
+            request.authorization.username,
+            request.authorization.password,
+            request.args.get('term', 27) # TODO Pull most recent from CAMS
+        )), mimetype='application/json')
+    except:
+        return authenticate()
 
 
 if __name__ == '__main__':

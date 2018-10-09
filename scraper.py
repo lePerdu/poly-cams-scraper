@@ -173,6 +173,8 @@ def scrape_courses(username, password, term):
     r = session.post(
         'https://cams.floridapoly.org/student/ceProcess.asp',
         data=form_data)
+    if r.status_code != 200:
+        raise Error('Could not login')
     # TODO Error if the login cookies aren't returned
 
     # The first page can be retrieved via GET, but the rest have to be POSTed

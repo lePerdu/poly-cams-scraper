@@ -1,2 +1,13 @@
+# .gitignore
+
+# Backup files
+*~
+
+# Mac BS
+.DS_Store
+
+# Python stuff
 __pycache__/
 venv/
+*.pyc
+

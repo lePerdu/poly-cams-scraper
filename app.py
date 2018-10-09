@@ -6,11 +6,13 @@
 import json
 
 from flask import Flask, Response, request
+from flask_heroku import Heroku
 
 import scraper
 
 
 app = Flask(__name__)
+heroku = Heroku(app)
 
 
 def to_json(obj, pretty=False):

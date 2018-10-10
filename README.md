@@ -17,12 +17,16 @@ The webserver can be run with `pipenv run python app.py`. It has the following
 API methods:
 * GET `/terms` - Returns a JSON object mapping term names (i.e. "Fall 2018") to
   term IDs used by other API methods.
-* POST `/courses` - Returns a JSON array of objects describing the available
+* GET `/courses` - Returns a JSON array of objects describing the available
   courses for a given term. The username and password are passed via HTTP Basic
-  Authentication and the term is passed via the `term` form data.
+  Authentication and the term is passed via the `term` URL parameter.
 
 Endpoints can be suffixed with `?pretty=true` to make them return JSON pretty-
 printed instead of minimized.
+
+The server doesn't store or cache any information, so authentication is
+required each time and it may take a few seconds to retrieve the list of
+courses.
 
 ### Course Scraper
 

@@ -45,5 +45,5 @@ section numbers that do not overlap.
 
 ## License
 
-[The Unlicense](unlicense.org)
+[The Unlicense](http://unlicense.org)
 

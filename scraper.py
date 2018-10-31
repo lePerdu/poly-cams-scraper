@@ -26,19 +26,19 @@ def get_text(elem):
 
 
 def parse_date(datestr):
-    """
-        Parses a date in the format %m/%d/%Y into a POSIX timestamp
-        TODO Should this output in ISO format instead?
-    """
+    '''
+    Parses a date in the format %m/%d/%Y into a POSIX timestamp
+    TODO Should this output in ISO format instead?
+    '''
     return int(datetime.strptime(datestr, '%m/%d/%Y').timestamp())
 
 
 def parse_time(timestr):
-    """
-        Parses a time in the format %H:%M:%S into a POSIX timestamp (number
-        of seconds from the start of the day)
-        TODO Should this output in ISO format instead?
-    """
+    '''
+    Parses a time in the format %H:%M:%S into a POSIX timestamp (number
+    of seconds from the start of the day)
+    TODO Should this output in ISO format instead?
+    '''
 
     # strptime uses 1900-01-01 as the default date, so subtract it out to get
     # the timestamp from the start of the day
@@ -57,12 +57,12 @@ def parse_course_id(id):
 
     # TODO What other suffixes are there besides C (for lab) and how can they
     # be differentiated from the type of course (i.e. GENMAT, ENGR)?
-    dep, course, sec = re.match(r'(\w{3})(\w{4}C?)(?:[^\d]+)?(\d+)?', id).groups()
+    dep, course, type, sec = re.match(r'(\w{3})(\w{4}C?)([^\d]+)?(\d+)?', id).groups()
     # Some course identifiers don't include the section, so we assume it's 1
-    return (dep, course, sec and int(sec) or 1)
+    return (dep, course, type, sec and int(sec) or 1)
 
 
-def parse_courses(tree):
+def parse_sections(tree):
     '''
     The formatting of this table is total crap and a real pain ass to parse,
     but here is the general format (the parts used to scrape out the info we
@@ -122,41 +122,87 @@ def parse_courses(tree):
 
     table = tree.xpath('//*[@id="mainBody"]/div[2]/table')[0]
 
-    # Course identifier, title, cedit count, date range, and enrolment counts
-    # are in one row, with the class "courseInfo"
-    row1s = table.xpath('tr[position() mod 3 = 1]')
+    # As if the format is bad enough by itself, but CAMS makes it worse by
+    # leaving out rows sometimes (for example, when the class times are not
+    # known), so we have to store some parser state in order to do "error
+    # handling"
+    current_sect = None
+    sections = []
+    for row in table.xpath('tr'):
+        if 'courseInfo' in row.classes:
+            # Hedaer
+            # Add the current_sect to the main list, but check if it is None
+            # first in case there is some invalid parse
+            if current_sect is not None:
+                sections.append(current_sect)
 
-    # The rest of the information is in a sub-table in a separate row
-    row2s = table.xpath('tr[position() mod 3 = 0]/td/table')
+            id, _, creds, start_date, end_date, cap, enr = \
+                map(get_text, row.xpath('td'))
+            # For courses currently offered, the title is wrapped in an anchor
+            # element, though for non-existing ones, it is not, so we have to find
+            # the text recursively
+            title = row.xpath('td[2]/a')[0].text_content().strip()
 
-    courses = []
-    for row1, row2 in zip(row1s, row2s):
-        id, title, creds, start_date, end_date, cap, enr = \
-            map(get_text, row1.xpath('td'))
-        # For courses currently offered, the title is wrapped in an anchor
-        # element, though for non-existing ones, it is not.
-        if title == '': title = get_text(row1.xpath('td[2]/a')[0])
+            current_sect = {
+                'id': parse_course_id(id),
+                'title': title,
+                'creds': int(creds),
+                'dates': (parse_date(start_date), parse_date(end_date)),
+                'sessions': [],
+            }
+        elif row.get('id', '')[0:4] == 'BlR_':
+            # Random blank display: none row that's here for absolutely no
+            # reason
+            pass
+        else:
+            # Time info
 
-        classes = []
-        for class_row in row2.xpath('tr[position() > 1]'):
-            _, instructor, room, days, _, start_time, end_time, _, _ = \
-                map(get_text, class_row.xpath('td'))
-            classes.append({
-                'instructor': instructor,
-                'room': room,
-                'days': days,
-                'times': (parse_time(start_time), parse_time(end_time)),
-            })
+            # Add in the time info to the section
+            for class_row in row.xpath('td/table/tr[position() > 1]'):
+                _, instructor, room, days, _, start_time, end_time, _, _ = \
+                    map(get_text, class_row.xpath('td'))
+                current_sect['sessions'].append({
+                    'instructor': instructor,
+                    'room': room,
+                    'days': days,
+                    'times': (parse_time(start_time), parse_time(end_time)),
+                })
 
-        courses.append({
-            'id': parse_course_id(id),
-            'title': title,
-            'credits': int(creds),
-            'dates': (parse_date(start_date), parse_date(end_date)),
-            'classes': classes
+    return sections
+
+
+def group_courses(sections):
+    '''
+    Processes the list of sections parsed from the scraper into a more useful
+    format by grouping sections of the same course.
+
+    TODO Should sessions be split up so that each entry has only one day?
+    '''
+
+    courses = {}
+    for sect in sections:
+        # Ignore the section number
+        id = sect['id'][0] + sect['id'][1] + sect['id'][2]
+        if id not in courses:
+            courses[id] = {
+                # TODO Should we still separate the ID?
+                'id': (sect['id'][0], sect['id'][1], sect['id'][2]),
+                # We assume that the title and credits are the same for all
+                # sections with the same base course identifier
+                'title': sect['title'],
+                'creds': sect['creds'],
+                'sections': [],
+            }
+
+        courses[id]['sections'].append({
+            'section': sect['id'][3],
+            'dates': sect['dates'],
+            'sessions': sect['sessions'],
         })
 
-    return courses
+    # Convert the dict into an array now that we don't need the keys any more
+    # (the IDs are stored in each entry)
+    return [courses[id] for id in courses]
 
 
 def scrape_courses(username, password, term):
@@ -188,7 +234,7 @@ def scrape_courses(username, password, term):
     accessKey = first_page_tree.xpath(
         '//form[@id="OptionsForm"]/input[@name="accessKey"]')[0].get('value')
 
-    all_courses = parse_courses(first_page_tree)
+    all_sections = parse_sections(first_page_tree)
 
     total_pages_text = first_page_tree.xpath(
         '//*[@id="mainBody"]/div[2]/div[1]/text()[last()]')[0]
@@ -215,22 +261,22 @@ def scrape_courses(username, password, term):
             data=offering_data)
 
         later_page_tree = html.fromstring(later_page.text)
-        courses = parse_courses(later_page_tree)
+        sections = parse_sections(later_page_tree)
 
-        all_courses.extend(courses)
+        all_sections.extend(sections)
 
     # Logout (don't care about the responce)
     session.get('https://cams.floridapoly.org/student/logout.asp')
 
-    return all_courses
+    return group_courses(all_sections)
 
 
 def scrape_terms():
-    """
+    '''
         Gets the mapping between term names and their numbers.
         This does not require login info, as the terms are listed on the login
         page.
-    """
+    '''
 
     login_page = requests.get('https://cams.floridapoly.org/student/login.asp')
 

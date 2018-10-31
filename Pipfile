@@ -4,13 +4,13 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-flask = "*"
-requests = "*"
-flask-heroku = "*"
 lxml = "*"
+requests = "*"
+flask = "*"
+flask-heroku = "*"
 gunicorn = "*"
 
 [dev-packages]
 
 [requires]
-python_version = "3.6"
+python_version = "3.7"

@@ -45,5 +45,5 @@ section numbers that do not overlap.
 
 ## License
 
-[The Unlicense](http://unlicense.org)
+[The MIT License](https://opensource.org/licenses/MIT)
 

@@ -50,16 +50,22 @@ def parse_course_id(id):
     '''
     Parses a course identifier of the form:
         DEP<COURSE #>TYPE<SECTION #>
-    Into a (departement, course, section) tuple
+    Into a (department, course, section) tuple
 
     Note: Some older courses do not have a type field or section
     '''
 
     # TODO What other suffixes are there besides C (for lab) and how can they
     # be differentiated from the type of course (i.e. GENMAT, ENGR)?
-    dep, course, type, sec = re.match(r'(\w{3})(\w{4}C?)([^\d]+)?(\d+)?', id).groups()
+    dep, number, type, sec = \
+        re.match(r'(\w{3})(\w{4}C?)([^\d]+)?(\d+)?', id).groups()
     # Some course identifiers don't include the section, so we assume it's 1
-    return (dep, course, type, sec and int(sec) or 1)
+    return {
+        'department': dep,
+        'number': number,
+        'type': type,
+        'section': sec and int(sec) or 1,
+    }
 
 
 def parse_sections(tree):
@@ -136,7 +142,7 @@ def parse_sections(tree):
             if current_sect is not None:
                 sections.append(current_sect)
 
-            id, _, creds, start_date, end_date, cap, enr = \
+            id, _, credits, start_date, end_date, cap, enr = \
                 map(get_text, row.xpath('td'))
             # For courses currently offered, the title is wrapped in an anchor
             # element, though for non-existing ones, it is not, so we have to find
@@ -146,8 +152,9 @@ def parse_sections(tree):
             current_sect = {
                 'id': parse_course_id(id),
                 'title': title,
-                'creds': int(creds),
-                'dates': (parse_date(start_date), parse_date(end_date)),
+                'credits': int(credits),
+                'startDate': parse_date(start_date),
+                'endDate': parse_date(end_date),
                 'sessions': [],
             }
         elif row.get('id', '')[0:4] == 'BlR_':
@@ -165,7 +172,8 @@ def parse_sections(tree):
                     'instructor': instructor,
                     'room': room,
                     'days': days,
-                    'times': (parse_time(start_time), parse_time(end_time)),
+                    'startTime': parse_time(start_time),
+                    'endTime': parse_time(end_time),
                 })
 
     return sections
@@ -174,29 +182,32 @@ def parse_sections(tree):
 def group_courses(sections):
     '''
     Processes the list of sections parsed from the scraper into a more useful
-    format by grouping sections of the same course.
+    format by grouping sections of the same course and flattening some
+    structures.
 
     TODO Should sessions be split up so that each entry has only one day?
     '''
 
     courses = {}
     for sect in sections:
-        # Ignore the section number
-        id = sect['id'][0] + sect['id'][1] + sect['id'][2]
-        if id not in courses:
-            courses[id] = {
-                # TODO Should we still separate the ID?
-                'id': (sect['id'][0], sect['id'][1], sect['id'][2]),
+        # Copy sect['id'] to avoid mutating the original data
+        id = sect['id'].copy()
+        secNum = id.pop('section')
+        idStr = str(id) # Stringify to use as a key into the courses dict
+        if idStr not in courses:
+            courses[idStr] = {
+                **id,
                 # We assume that the title and credits are the same for all
                 # sections with the same base course identifier
                 'title': sect['title'],
-                'creds': sect['creds'],
+                'credits': sect['credits'],
                 'sections': [],
             }
 
-        courses[id]['sections'].append({
-            'section': sect['id'][3],
-            'dates': sect['dates'],
+        courses[idStr]['sections'].append({
+            'section': secNum,
+            'startDate': sect['startDate'],
+            'endDate': sect['endDate'],
             'sessions': sect['sessions'],
         })
 

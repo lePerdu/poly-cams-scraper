@@ -23,21 +23,8 @@ def conflicts(c1, c2):
 def print_schedules(all_courses, names):
     # Filter courses to those with ids in the names parameter (combination of
     # the departement and the course number).
-    # Also group courses by course ID (i.e. the array is of sections of each
-    # course)
-    course_groups = {}
-    for c in all_courses:
-        dep, id, sec = c['id']
-
-        name = dep + id
-        if any(map(lambda n: n == name, names)):
-            if name in course_groups:
-                course_groups[name].append(c)
-            else:
-                course_groups[name] = [c]
-
-    # Each element is a list of the sections of a certain course
-    sections = (cs for _, cs in course_groups.items())
+    courses = \
+        filter(lambda c: c['departement'] + c['number'] in names, all_courses)
 
     # Take one section of each course
     # (The iterators are turned into lists so that iterating over them doesn't

@@ -4,11 +4,18 @@
 # Functions for scraping data from the CAMS portal
 #
 
+import asyncio
 import re
 from datetime import datetime
 
-import requests
+import aiohttp
 from lxml import html
+
+CAMS_LOGIN_PAGE_URL = 'https://cams.floridapoly.org/student/login.asp'
+CAMS_LOGIN_URL = 'https://cams.floridapoly.org/student/ceProcess.asp'
+CAMS_COURSE_PAGE_URL = \
+    'https://cams.floridapoly.org/student/cePortalOffering.asp'
+CAMS_LOGOUT_URL = 'https://cams.floridapoly.org/student/logout.asp'
 
 
 class AuthError(Exception):
@@ -27,9 +34,9 @@ def parse_jsonish(jsonish):
     (The CAMS page calls `eval()` on the responses)
     """
     stripped = jsonish[1:-1]
-    double_quotes = re.sub(b"'", b'"', stripped)
-    actual_json = re.sub(rb'new Date\(("[^"]*")\)', rb'\1', double_quotes)
-    with_bools = re.sub(rb'"false"', b'false', actual_json)
+    double_quotes = re.sub("'", '"', stripped)
+    actual_json = re.sub(r'new Date\(("[^"]*")\)', r'\1', double_quotes)
+    with_bools = re.sub('"false"', 'false', actual_json)
     return json.loads(with_bools)
 
 
@@ -235,8 +242,30 @@ def group_courses(sections):
     return [courses[id] for id in courses]
 
 
-def scrape_courses(username, password, term):
-    form_data = {
+async def scrape_course_page(session, access_key, term, page):
+    page_data = {
+        'IsPostBack': 'True',
+        'page': page,
+        'accessKey': access_key,
+        'f_TermCalendarID': term,
+        'f_Days': '',
+        'f_TimeFrom': '',
+        'f_TimeTo': '',
+        'f_Campuses': '',
+        'f_Departments': '',
+        'f_Divisions': '',
+        'TimeFrom': '',
+        'TimeTo': '',
+    }
+
+    async with session.post(CAMS_COURSE_PAGE_URL, data=page_data) as resp:
+        page_tree = html.fromstring(await resp.text())
+
+    return parse_sections(page_tree)
+
+
+async def scrape_courses(username, password, term):
+    login_form_data = {
         'txtUsername': username,
         'txtPassword': password,
         'term': term,
@@ -244,76 +273,57 @@ def scrape_courses(username, password, term):
         'op': 'login'
     }
 
-    session = requests.Session()
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            CAMS_LOGIN_URL, data=login_form_data) as login_resp:
 
-    r = session.post(
-        'https://cams.floridapoly.org/student/ceProcess.asp',
-        data=form_data)
+            login_data = parse_jsonish(await login_resp.text())
 
-    login_data = parse_jsonish(r.content)
-    if r.status_code != 200 or not login_data['loginStatus']:
-        raise Exception(login_data['strError'])
+        if not login_data['loginStatus']:
+            raise Exception(login_data['strError'])
 
-    # TODO Error if the login cookies aren't returned
+        # The first page can be retrieved via GET, but the rest have to be POSTed
+        # and contain an access key returned in a form in the first page
+        async with session.get(CAMS_COURSE_PAGE_URL) as first_page_resp:
+            first_page_tree = html.fromstring(await first_page_resp.text())
 
-    # The first page can be retrieved via GET, but the rest have to be POSTed
-    # and contain an access key returned in a form in the first page
-    first_page = session.get(
-        'https://cams.floridapoly.org/student/cePortalOffering.asp')
+        # Get the accessKey
+        access_key = first_page_tree.xpath(
+            '//form[@id="OptionsForm"]/input[@name="accessKey"]'
+        )[0].get('value')
 
-    first_page_tree = html.fromstring(first_page.text)
+        all_sections = parse_sections(first_page_tree)
 
-    # Get the accessKey
-    accessKey = first_page_tree.xpath(
-        '//form[@id="OptionsForm"]/input[@name="accessKey"]')[0].get('value')
+        total_pages_text = first_page_tree.xpath(
+            '//*[@id="mainBody"]/div[2]/div[1]/text()[last()]')[0]
+        page_count = int(re.search(
+            r'Total Pages: (\d+)', total_pages_text).group(1))
 
-    all_sections = parse_sections(first_page_tree)
+        # Fetch the rest of the pages asynchronously all at once
+        later_page_sections = await asyncio.gather(*(
+            scrape_course_page(session, access_key, term, page)
+            for page in range(2, page_count + 1)
+        ))
 
-    total_pages_text = first_page_tree.xpath(
-        '//*[@id="mainBody"]/div[2]/div[1]/text()[last()]')[0]
-    pages = int(re.search(r'Total Pages: (\d+)', total_pages_text).group(1))
+        # Logout (don't care about the responce)
+        async with session.get(CAMS_LOGOUT_URL):
+            pass
 
-    for page in range(2, pages + 1):
-        offering_data = {
-            'IsPostBack': 'True',
-            'page': page,
-            'accessKey': accessKey,
-            'f_TermCalendarID': term,
-            'f_Days': '',
-            'f_TimeFrom': '',
-            'f_TimeTo': '',
-            'f_Campuses': '',
-            'f_Departments': '',
-            'f_Divisions': '',
-            'TimeFrom': '',
-            'TimeTo': '',
-        }
-
-        later_page = session.post(
-            'https://cams.floridapoly.org/student/cePortalOffering.asp',
-            data=offering_data)
-
-        later_page_tree = html.fromstring(later_page.text)
-        sections = parse_sections(later_page_tree)
-
-        all_sections.extend(sections)
-
-    # Logout (don't care about the responce)
-    session.get('https://cams.floridapoly.org/student/logout.asp')
+    for s in later_page_sections:
+        all_sections.extend(s)
 
     return group_courses(all_sections)
 
 
-def scrape_terms():
+async def scrape_terms():
     """Gets the mapping between term names and their numbers.
     This does not require login info, as the terms are listed on the login
     page.
     """
 
-    login_page = requests.get('https://cams.floridapoly.org/student/login.asp')
-
-    login_page_tree = html.fromstring(login_page.text)
-
+    async with aiohttp.ClientSession() as session:
+        async with session.get(CAMS_LOGIN_PAGE_URL) as login_page:
+            login_page_tree = html.fromstring(await login_page.text())
 
     terms = {}
     for term in login_page_tree.xpath('//*[@id="idterm"]/option'):
@@ -322,16 +332,17 @@ def scrape_terms():
     return terms
 
 
-def scrape_latest_term():
+async def scrape_latest_term():
     """Gets the most recent term available."""
-    return max(scrape_terms().values())
+    terms = await scrape_terms()
+    return max(terms.values())
 
 
 # main() function for executing the scraper locally
 # TODO Remove this once the project is more stable
 import json
 import sys
-def main():
+async def main():
     username = sys.argv[1]
     password = sys.argv[2]
 
@@ -339,11 +350,11 @@ def main():
     if len(sys.argv) > 3:
         term = sys.argv[3]
     else:
-        term = scrape_latest_term()
+        term = await scrape_latest_term()
 
-    courses = scrape_courses(username, password, term)
+    courses = await scrape_courses(username, password, term)
     print(json.dumps(courses, indent=2))
 
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())

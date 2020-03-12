@@ -324,7 +324,7 @@ def scrape_terms():
 
 def scrape_latest_term():
     """Gets the most recent term available."""
-    return max(t for _, t in scrape_terms())
+    return max(scrape_terms().values())
 
 
 # main() function for executing the scraper locally

@@ -19,10 +19,8 @@ API methods:
   term IDs used by other API methods.
 * GET `/courses` - Returns a JSON array of objects describing the available
   courses for a given term. The username and password are passed via HTTP Basic
-  Authentication and the term is passed via the `term` URL parameter.
-
-Endpoints can be suffixed with `?pretty=true` to make them return JSON pretty-
-printed instead of minimized.
+  Authentication and the term is passed via the `term` URL parameter. If no term
+  is provided, this defaults to the latest term.
 
 The server doesn't store or cache any information, so authentication is
 required each time and it may take a few seconds to retrieve the list of

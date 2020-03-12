@@ -11,6 +11,11 @@ import requests
 from lxml import html
 
 
+class AuthError(Exception):
+    """Error type for authentication errors."""
+    pass
+
+
 def parse_jsonish(jsonish):
     """Parses the retarded data format CAMS uses.
     It could 100% be JSON, but instead it:
@@ -43,19 +48,17 @@ def get_text(elem):
 
 
 def parse_date(datestr):
-    '''
-    Parses a date in the format %m/%d/%Y into a POSIX timestamp
+    """Parses a date in the format %m/%d/%Y into a POSIX timestamp.
     TODO Should this output in ISO format instead?
-    '''
+    """
     return int(datetime.strptime(datestr, '%m/%d/%Y').timestamp())
 
 
 def parse_time(timestr):
-    '''
-    Parses a time in the format %H:%M:%S into a POSIX timestamp (number
-    of seconds from the start of the day)
+    """Parses a time in the format %H:%M:%S into a POSIX timestamp.
+    (number of seconds from the start of the day)
     TODO Should this output in ISO format instead?
-    '''
+    """
 
     # strptime uses 1900-01-01 as the default date, so subtract it out to get
     # the timestamp from the start of the day
@@ -64,13 +67,13 @@ def parse_time(timestr):
 
 
 def parse_course_id(id):
-    '''
-    Parses a course identifier of the form:
+    """Parses a course identifier.
+    These are in the form:
         DEP<COURSE #>TYPE<SECTION #>
     Into a (department, course, section) tuple
 
     Note: Some older courses do not have a type field or section
-    '''
+    """
 
     # TODO What other suffixes are there besides C (for lab) and how can they
     # be differentiated from the type of course (i.e. GENMAT, ENGR)?
@@ -86,7 +89,7 @@ def parse_course_id(id):
 
 
 def parse_sections(tree):
-    '''
+    """Scrapes the section list from the HTML.
     The formatting of this table is total crap and a real pain ass to parse,
     but here is the general format (the parts used to scrape out the info we
     ):
@@ -141,7 +144,7 @@ def parse_sections(tree):
 
             <!-- Rest of the courses -->
         </table>
-    '''
+    """
 
     table = tree.xpath('//*[@id="mainBody"]/div[2]/table')[0]
 
@@ -197,13 +200,12 @@ def parse_sections(tree):
 
 
 def group_courses(sections):
-    '''
-    Processes the list of sections parsed from the scraper into a more useful
+    """Processes the list of sections parsed from the scraper into a more useful
     format by grouping sections of the same course and flattening some
     structures.
 
     TODO Should sessions be split up so that each entry has only one day?
-    '''
+    """
 
     courses = {}
     for sect in sections:
@@ -303,11 +305,10 @@ def scrape_courses(username, password, term):
 
 
 def scrape_terms():
-    '''
-        Gets the mapping between term names and their numbers.
-        This does not require login info, as the terms are listed on the login
-        page.
-    '''
+    """Gets the mapping between term names and their numbers.
+    This does not require login info, as the terms are listed on the login
+    page.
+    """
 
     login_page = requests.get('https://cams.floridapoly.org/student/login.asp')
 
@@ -321,21 +322,28 @@ def scrape_terms():
     return terms
 
 
+def scrape_latest_term():
+    """Gets the most recent term available."""
+    return max(t for _, t in scrape_terms())
+
+
 # main() function for executing the scraper locally
 # TODO Remove this once the project is more stable
 import json
 import sys
-def main(argv):
-    username = argv[0]
-    password = argv[1]
+def main():
+    username = sys.argv[1]
+    password = sys.argv[2]
 
-    # TODO Figure out what terms are valid
-    # (19 is Fall 2017)
-    term = len(argv) > 2 and argv[2] or 27
+    # Use the latest term if not provided
+    if len(sys.argv) > 3:
+        term = sys.argv[3]
+    else:
+        term = scrape_latest_term()
 
     courses = scrape_courses(username, password, term)
     print(json.dumps(courses, indent=2))
 
-if __name__ == '__main__':
-    main(sys.argv[1:])
 
+if __name__ == '__main__':
+    main()

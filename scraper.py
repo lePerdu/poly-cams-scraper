@@ -11,6 +11,23 @@ import requests
 from lxml import html
 
 
+def parse_jsonish(jsonish):
+    """Parses the retarded data format CAMS uses.
+    It could 100% be JSON, but instead it:
+    - Is wrapped in parentheses
+    - Uses single quotes
+    - Uses `new Date(<date string (in non-standard format)>)`
+    - Quotes booleans (still valid JSON, but annoying and pointless)
+
+    (The CAMS page calls `eval()` on the responses)
+    """
+    stripped = jsonish[1:-1]
+    double_quotes = re.sub(b"'", b'"', stripped)
+    actual_json = re.sub(rb'new Date\(("[^"]*")\)', rb'\1', double_quotes)
+    with_bools = re.sub(rb'"false"', b'false', actual_json)
+    return json.loads(with_bools)
+
+
 def pairs_to_dict(pairs):
     return {k: v for k, v in pairs if k}
 
@@ -106,7 +123,7 @@ def parse_sections(tree):
 
                         <!-- Each class time is listed in this format: -->
                         <tr>
-                            <td class="blankCell"></th>
+                            <td class="blankCell"></td>
                             <td>{Instructor}</td>
                             <td>{Room}</td>
                             <td>{Days}</td>
@@ -145,9 +162,9 @@ def parse_sections(tree):
             id, _, credits, start_date, end_date, cap, enr = \
                 map(get_text, row.xpath('td'))
             # For courses currently offered, the title is wrapped in an anchor
-            # element, though for non-existing ones, it is not, so we have to find
-            # the text recursively
-            title = row.xpath('td[2]/a')[0].text_content().strip()
+            # element, though for non-existing ones, it is not, so we have to
+            # find all text inside nested elements
+            title = row.xpath('td[2]')[0].text_content().strip()
 
             current_sect = {
                 'id': parse_course_id(id),
@@ -230,8 +247,11 @@ def scrape_courses(username, password, term):
     r = session.post(
         'https://cams.floridapoly.org/student/ceProcess.asp',
         data=form_data)
-    if r.status_code != 200:
-        raise Error('Could not login')
+
+    login_data = parse_jsonish(r.content)
+    if r.status_code != 200 or not login_data['loginStatus']:
+        raise Exception(login_data['strError'])
+
     # TODO Error if the login cookies aren't returned
 
     # The first page can be retrieved via GET, but the rest have to be POSTed
